@@ -4,7 +4,7 @@ from pathlib import Path
 import pickle
 
 import pandas as pd
-from tensorflow import gfile
+from tensorflow.io import gfile
 from keras.utils import to_categorical
 from keras.preprocessing.sequence import pad_sequences
 from text_preprocessor import TextPreprocessor

@@ -4,7 +4,7 @@ import os
 import pickle
 from pathlib import Path
 import numpy as np
-from tensorflow import gfile
+from tensorflow.io import gfile
 from tensorflow.python.lib.io import file_io
 from keras.models import Model, Input
 from keras.layers import LSTM, Embedding, Dense, TimeDistributed, Dropout, Bidirectional
