@@ -5,8 +5,8 @@ import pickle
 
 import pandas as pd
 from tensorflow.io import gfile
-from keras.utils import to_categorical
-from keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 from text_preprocessor import TextPreprocessor
 
 PREPROCESS_FILE = 'processor_state.pkl'
