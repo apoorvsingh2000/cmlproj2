@@ -13,7 +13,7 @@ PREPROCESS_FILE = 'processor_state.pkl'
 
 
 def read_data(input1_path):
-  with gfile.Open(input1_path, 'r') as input1_file:
+  with gfile.GFile(input1_path, 'r') as input1_file:
     print('processing')
     print('input file', input1_file)
     csv_data = pd.read_csv(input1_file, error_bad_lines=False)
