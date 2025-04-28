@@ -4,129 +4,92 @@ from pathlib import Path
 import pickle
 
 import pandas as pd
-from tensorflow.io import gfile
+import tensorflow as tf
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+
 from text_preprocessor import TextPreprocessor
 
 PREPROCESS_FILE = 'processor_state.pkl'
 
+def read_data(path: str) -> pd.DataFrame:
+    with tf.io.gfile.GFile(path, 'r') as f:
+        print(f'Processing file: {path}')
+        return pd.read_csv(f, on_bad_lines='skip')
 
-def read_data(input1_path):
-  with gfile.GFile(input1_path, 'r') as input1_file:
-    print('processing')
-    print('input file', input1_file)
-    csv_data = pd.read_csv(input1_file, error_bad_lines=False)
-    return csv_data
+def save_pickle(obj, path: str) -> None:
+    with tf.io.gfile.GFile(path, 'wb') as f:
+        pickle.dump(obj, f)
 
+def main():
+    parser = argparse.ArgumentParser(description='NER data preprocessing')
+    
+    parser.add_argument('--input-path', type=str, help='Input CSV file path')
+    parser.add_argument('--output-x-path', type=str, help='Output X pickle path')
+    parser.add_argument('--output-x-path-file', type=str, help='Path to write X file location')
+    parser.add_argument('--output-y-path', type=str, help='Output Y pickle path')
+    parser.add_argument('--output-y-path-file', type=str, help='Path to write Y file location')
+    parser.add_argument('--output-preprocessing-state-path', type=str, help='Output preprocessor state directory')
+    parser.add_argument('--output-preprocessing-state-path-file', type=str, help='Path to write preprocessor state location')
+    parser.add_argument('--output-tags', type=str, help='Path to save number of tags')
+    parser.add_argument('--output-words', type=str, help='Path to save number of words')
 
-# Defining and parsing the command-line arguments
-parser = argparse.ArgumentParser(description='My program description')
-parser.add_argument('--input1-path', type=str,
-                    help='Path of the local file or GCS blob containing the Input 1 data.')
+    args = parser.parse_args()
 
-parser.add_argument('--output-tags', type=str, help='')
-parser.add_argument('--output-words', type=str, help='')
+    df = read_data(args.input_path)
 
-parser.add_argument('--output-x-path', type=str, help='')
-parser.add_argument('--output-x-path-file', type=str, help='')
+    drop_cols = [
+        'Unnamed: 0', 'lemma', 'next-lemma', 'next-next-lemma', 'next-next-pos',
+        'next-next-shape', 'next-next-word', 'next-pos', 'next-shape', 'next-word',
+        'prev-iob', 'prev-lemma', 'prev-pos', 'prev-prev-iob', 'prev-prev-lemma',
+        'prev-prev-pos', 'prev-prev-shape', 'prev-prev-word', 'prev-shape', 'prev-word',
+        'pos', 'shape'
+    ]
+    df = df.drop(columns=drop_cols, errors='ignore')
 
-parser.add_argument('--output-y-path', type=str, help='')
-parser.add_argument('--output-y-path-file', type=str, help='')
+    grouped = df.groupby('sentence_idx').apply(
+        lambda s: [(w, t) for w, t in zip(s['word'], s['tag'])]
+    )
+    sentences = list(grouped)
+    texts = [' '.join([w for w, _ in sent]) for sent in sentences]
 
-parser.add_argument('--output-preprocessing-state-path', type=str, help='')
-parser.add_argument(
-    '--output-preprocessing-state-path-file', type=str, help='')
+    maxlen = max(len(sent) for sent in sentences)
+    print(f'Max sequence length: {maxlen}')
 
-args = parser.parse_args()
+    words = sorted({w for sent in sentences for w, _ in sent})
+    tags = sorted({t for sent in sentences for _, t in sent})
+    print(f'Vocab size: {len(words)}, Tag count: {len(tags)}')
 
-# read data
-data = read_data(args.input1_path)
+    for p in [args.output_x_path, args.output_y_path, args.output_preprocessing_state_path]:
+        tf.io.gfile.makedirs(os.path.dirname(p))
 
-# remove not required columns
-data = data.drop(['Unnamed: 0', 'lemma', 'next-lemma', 'next-next-lemma', 'next-next-pos',
-                  'next-next-shape', 'next-next-word', 'next-pos', 'next-shape',
-                  'next-word', 'prev-iob', 'prev-lemma', 'prev-pos',
-                  'prev-prev-iob', 'prev-prev-lemma', 'prev-prev-pos', 'prev-prev-shape',
-                  'prev-prev-word', 'prev-shape', 'prev-word', "pos", "shape"], axis=1)
+    processor = TextPreprocessor(maxlen)
+    processor.fit(texts)
+    processor.labels = tags
+    preprocessor_save_path = os.path.join(args.output_preprocessing_state_path, PREPROCESS_FILE)
+    processor.save(preprocessor_save_path)
 
-print(data.head())
+    X = processor.transform(texts)
 
-# build sentences
+    tag2idx = {t: i for i, t in enumerate(tags)}
+    y_indices = [[tag2idx[t] for _, t in sent] for sent in sentences]
+    y_padded = pad_sequences(y_indices, maxlen=maxlen, padding='post', value=tag2idx.get('O', 0))
+    y = [to_categorical(seq, num_classes=len(tags)) for seq in y_padded]
 
+    save_pickle(X, args.output_x_path)
+    save_pickle(y, args.output_y_path)
 
-def agg_func(s):
-  return [(w, t) for w, t in zip(s["word"].values.tolist(),
-                                 s["tag"].values.tolist())]
+    downstream = [
+        (args.output_x_path_file, args.output_x_path),
+        (args.output_y_path_file, args.output_y_path),
+        (args.output_preprocessing_state_path_file, preprocessor_save_path),
+        (args.output_tags, str(len(tags))),
+        (args.output_words, str(len(words)))
+    ]
 
+    for file_path, content in downstream:
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(file_path).write_text(content)
 
-grouped = data.groupby("sentence_idx").apply(agg_func)
-sentences = [s for s in grouped]
-sentences_list = [" ".join([s[0] for s in sent]) for sent in sentences]
-
-# calculate maxlen
-maxlen = max([len(s) for s in sentences])
-print('Maximum sequence length:', maxlen)
-
-# calculate words
-words = list(set(data["word"].values))
-n_words = len(words)
-print('Number of words:', n_words)
-
-# calculate tags
-tags = list(set(data["tag"].values))
-n_tags = len(tags)
-print('Number of tags:', n_tags)
-print('Type of tags:', tags)
-
-# create output folder for x and y
-gfile.MakeDirs(os.path.dirname(args.output_x_path))
-gfile.MakeDirs(os.path.dirname(args.output_y_path))
-
-# preprocess text
-processor = TextPreprocessor(140)
-processor.fit(sentences_list)
-processor.labels = list(set(data["tag"].values))
-
-X = processor.transform(sentences_list)
-
-# preprocess tags
-tag2idx = {t: i for i, t in enumerate(tags)}
-y = [[tag2idx[w[1]] for w in s] for s in sentences]
-y = pad_sequences(maxlen=140, sequences=y, padding="post", value=tag2idx["O"])
-y = [to_categorical(i, num_classes=n_tags) for i in y]
-
-# export features and labels for training
-with gfile.GFile(args.output_x_path, 'w') as output_X:
-  pickle.dump(X, output_X)
-
-with gfile.GFile(args.output_y_path, 'w') as output_y:
-  pickle.dump(y, output_y)
-
-# export preprocessing state, required for custom prediction route used
-# during inference
-preprocess_output = args.output_preprocessing_state_path + '/' + PREPROCESS_FILE
-with gfile.GFile(preprocess_output, 'w') as output_preprocessing_state:
-  pickle.dump(processor, output_preprocessing_state)
-
-# with open('./processor_state.pkl', 'wb') as f:
-#  pickle.dump(processor, f)
-
-# writing x and y path to a file for downstream tasks
-Path(args.output_x_path_file).parent.mkdir(parents=True, exist_ok=True)
-Path(args.output_x_path_file).write_text(args.output_x_path)
-
-Path(args.output_y_path_file).parent.mkdir(parents=True, exist_ok=True)
-Path(args.output_y_path_file).write_text(args.output_y_path)
-
-Path(args.output_preprocessing_state_path_file).parent.mkdir(
-    parents=True, exist_ok=True)
-Path(args.output_preprocessing_state_path_file).write_text(
-    args.output_preprocessing_state_path + '/' + PREPROCESS_FILE)
-
-# TODO @Sascha use int rather then str
-Path(args.output_tags).parent.mkdir(parents=True, exist_ok=True)
-Path(args.output_tags).write_text(str(n_tags))
-
-Path(args.output_words).parent.mkdir(parents=True, exist_ok=True)
-Path(args.output_words).write_text(str(n_words))
+if __name__ == '__main__':
+    main()
