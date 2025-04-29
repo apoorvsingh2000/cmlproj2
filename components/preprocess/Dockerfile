@@ -1,8 +1,13 @@
-ARG BASE_IMAGE_TAG=2.11.0
-FROM tensorflow/tensorflow:${BASE_IMAGE_TAG}
+FROM python:3.10-slim
 
-# Install any extra packages you need (example: scikit-learn, pandas if used)
-RUN pip install --no-cache-dir pandas scikit-learn
+# Install basic requirements
+RUN pip install --upgrade pip
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
-# Copy your source code into the container
-COPY ./src /pipelines/component/src
+# Copy source code
+COPY src/ /app/
+WORKDIR /app
+
+# Run the component
+ENTRYPOINT ["python", "component.py"]

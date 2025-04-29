@@ -1,14 +1,9 @@
-#!/bin/sh
+#!/bin/bash
+set -e
 
-BUCKET="my-kubeflow-bucket-1745602479"
+mkdir -p specs
+cp preprocess/component.yaml specs/preprocess.yaml
+cp train/component.yaml specs/train.yaml
+cp deploy/component.yaml specs/deploy.yaml
 
-echo "\nCopy component specifications to Google Cloud Storage"
-
-# Copy Preprocess Component
-gsutil cp preprocess/component.yaml gs://${BUCKET}/components/preprocess/component.yaml
-
-# Copy Train Component
-gsutil cp train/component.yaml gs://${BUCKET}/components/train/component.yaml
-
-# Copy Deploy Component
-gsutil cp deploy/component.yaml gs://${BUCKET}/components/deploy/component.yaml
+echo "Component specifications copied to specs/ folder."

@@ -1,32 +1,23 @@
-name: preprocess
-description: Performs the IOB preprocessing for NER data.
-
+name: Preprocess Component
+description: Preprocess the data for NER task.
 inputs:
-- {name: Input Path, type: GCSPath}
-- {name: Output X Path Template, type: GCSPath}
-- {name: Output Y Path Template, type: GCSPath}
-- {name: Output Preprocessing State Path Template, type: GCSPath}
-
+- {name: input_path, type: String}
+- {name: output_x_path, type: String}
+- {name: output_y_path, type: String}
+- {name: output_preprocessing_state_path, type: String}
 outputs:
-- {name: Output X Path, type: GCSPath}
-- {name: Output Y Path, type: GCSPath}
-- {name: Output Tags, type: String}
-- {name: Output Words, type: String}
-- {name: Output Preprocessing State Path, type: String}
-
+- {name: output_x_path, type: String}
+- {name: output_y_path, type: String}
+- {name: output_tags, type: String}
+- {name: output_words, type: String}
+- {name: output_preprocessing_state_path, type: String}
 implementation:
   container:
     image: us-east1-docker.pkg.dev/cmlproj2/ner-repo/preprocess:latest
     command: [
-      python3, /pipelines/component/src/component.py,
-      --input-path, {inputValue: Input Path},
-      --output-x-path, {inputValue: Output X Path Template},
-      --output-y-path, {inputValue: Output Y Path Template},
-      --output-preprocessing-state-path, {inputValue: Output Preprocessing State Path Template},
-
-      --output-x-path-file, {outputPath: Output X Path},
-      --output-y-path-file, {outputPath: Output Y Path},
-      --output-preprocessing-state-path-file, {outputPath: Output Preprocessing State Path},
-      --output-tags, {outputPath: Output Tags},
-      --output-words, {outputPath: Output Words}
+      "python", "component.py",
+      "--input-path", {inputValue: input_path},
+      "--output-x-path", {inputValue: output_x_path},
+      "--output-y-path", {inputValue: output_y_path},
+      "--output-preprocessing-state-path", {inputValue: output_preprocessing_state_path}
     ]

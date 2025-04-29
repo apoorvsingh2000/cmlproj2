@@ -1,29 +1,25 @@
-name: train
-description: Trains the NER Bi-LSTM.
+name: Train Component
+description: Train the NER model.
 inputs:
-- {name: Input x URI, type: GCSPath}
-- {name: Input y URI, type: GCSPath}
-- {name: Input job dir URI, type: GCSPath}
-- {name: Input tags, type: Integer}
-- {name: Input words, type: Integer}
-- {name: Input dropout }
-- {name: Output model URI template, type: GCSPath}
+- {name: input_x_path, type: String}
+- {name: input_y_path, type: String}
+- {name: input_job_dir, type: String}
+- {name: input_tags, type: Integer}
+- {name: input_words, type: Integer}
+- {name: input_dropout, type: Float}
 outputs:
-  - name: Output model URI
-    type: GCSPath
+- {name: output_model_path, type: String}
 implementation:
   container:
-    image: us-east1-docker.pkg.dev/<PROJECT-ID>/ner-repo/train:latest
+    image: us-east1-docker.pkg.dev/cmlproj2/ner-repo/train:latest
     command: [
-      python3, /pipelines/component/src/train.py,
-      --input-x-path,             {inputValue: Input x URI},
-      --input-job-dir,            {inputValue: Input job dir URI},
-      --input-y-path,             {inputValue: Input y URI},
-      --input-tags,               {inputValue: Input tags},
-      --input-words,              {inputValue: Input words},
-      --input-dropout,            {inputValue: Input dropout},
-      --output-model-path,        {inputValue: Output model URI template},
-
-      --output-model-path-file,   {outputPath: Output model URI},
-
+      "python", "train.py",
+      "--input-x-path", {inputValue: input_x_path},
+      "--input-y-path", {inputValue: input_y_path},
+      "--input-job-dir", {inputValue: input_job_dir},
+      "--input-tags", {inputValue: input_tags},
+      "--input-words", {inputValue: input_words},
+      "--input-dropout", {inputValue: input_dropout},
+      "--output-model-path", {outputPath: output_model_path},
+      "--output-model-path-file", {outputPath: output_model_path}
     ]

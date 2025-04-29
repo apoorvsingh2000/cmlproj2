@@ -1,10 +1,19 @@
-#!/bin/sh
+#!/bin/bash
+set -e
 
-echo "\nBuild and push preprocess component"
-./preprocess/build_image.sh
+echo "Building Preprocess component..."
+cd preprocess
+bash build_image.sh
+cd ..
 
-echo "\nBuild and push train component"
-./train/build_image.sh
+echo "Building Train component..."
+cd train
+bash build_image.sh
+cd ..
 
-echo "\nBuild and push deploy component"
-./deploy/build_image.sh
+echo "Building Deploy component..."
+cd deploy
+bash build_image.sh
+cd ..
+
+echo "All components built and pushed successfully!"

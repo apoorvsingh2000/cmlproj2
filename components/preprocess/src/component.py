@@ -1,95 +1,96 @@
 import argparse
 import os
-from pathlib import Path
 import pickle
+from pathlib import Path
 
 import pandas as pd
-import tensorflow as tf
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-
 from text_preprocessor import TextPreprocessor
+
+from google.cloud import storage
 
 PREPROCESS_FILE = 'processor_state.pkl'
 
-def read_data(path: str) -> pd.DataFrame:
-    with tf.io.gfile.GFile(path, 'r') as f:
-        print(f'Processing file: {path}')
-        return pd.read_csv(f, on_bad_lines='skip')
+def upload_to_gcs(local_path, gcs_path):
+    """Uploads a local file to GCS"""
+    client = storage.Client()
+    bucket_name, blob_path = gcs_path.replace("gs://", "").split("/", 1)
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.upload_from_filename(local_path)
 
-def save_pickle(obj, path: str) -> None:
-    with tf.io.gfile.GFile(path, 'wb') as f:
-        pickle.dump(obj, f)
+def read_data(input_path):
+    if input_path.startswith("gs://"):
+        client = storage.Client()
+        bucket_name, blob_path = input_path.replace("gs://", "").split("/", 1)
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        contents = blob.download_as_text()
+        from io import StringIO
+        data = pd.read_csv(StringIO(contents))
+    else:
+        data = pd.read_csv(input_path)
+    return data
 
 def main():
-    parser = argparse.ArgumentParser(description='NER data preprocessing')
+    parser = argparse.ArgumentParser(description='Preprocessing component')
+    parser.add_argument('--input-path', type=str, required=True)
+    parser.add_argument('--output-x-path', type=str, required=True)
+    parser.add_argument('--output-y-path', type=str, required=True)
+    parser.add_argument('--output-preprocessing-state-path', type=str, required=True)
     
-    parser.add_argument('--input-path', type=str, help='Input CSV file path')
-    parser.add_argument('--output-x-path', type=str, help='Output X pickle path')
-    parser.add_argument('--output-x-path-file', type=str, help='Path to write X file location')
-    parser.add_argument('--output-y-path', type=str, help='Output Y pickle path')
-    parser.add_argument('--output-y-path-file', type=str, help='Path to write Y file location')
-    parser.add_argument('--output-preprocessing-state-path', type=str, help='Output preprocessor state directory')
-    parser.add_argument('--output-preprocessing-state-path-file', type=str, help='Path to write preprocessor state location')
-    parser.add_argument('--output-tags', type=str, help='Path to save number of tags')
-    parser.add_argument('--output-words', type=str, help='Path to save number of words')
-
     args = parser.parse_args()
 
-    df = read_data(args.input_path)
+    # Read input data
+    data = read_data(args.input_path)
 
-    drop_cols = [
+    # Preprocessing
+    data = data.drop([
         'Unnamed: 0', 'lemma', 'next-lemma', 'next-next-lemma', 'next-next-pos',
-        'next-next-shape', 'next-next-word', 'next-pos', 'next-shape', 'next-word',
-        'prev-iob', 'prev-lemma', 'prev-pos', 'prev-prev-iob', 'prev-prev-lemma',
-        'prev-prev-pos', 'prev-prev-shape', 'prev-prev-word', 'prev-shape', 'prev-word',
-        'pos', 'shape'
-    ]
-    df = df.drop(columns=drop_cols, errors='ignore')
+        'next-next-shape', 'next-next-word', 'next-pos', 'next-shape',
+        'next-word', 'prev-iob', 'prev-lemma', 'prev-pos',
+        'prev-prev-iob', 'prev-prev-lemma', 'prev-prev-pos', 'prev-prev-shape',
+        'prev-prev-word', 'prev-shape', 'prev-word', "pos", "shape"
+    ], axis=1)
 
-    grouped = df.groupby('sentence_idx').apply(
-        lambda s: [(w, t) for w, t in zip(s['word'], s['tag'])]
-    )
-    sentences = list(grouped)
-    texts = [' '.join([w for w, _ in sent]) for sent in sentences]
+    # Build sentences
+    grouped = data.groupby("sentence_idx").apply(lambda s: [(w, t) for w, t in zip(s["word"], s["tag"])])
+    sentences = [s for s in grouped]
+    sentences_list = [" ".join([s[0] for s in sent]) for sent in sentences]
 
-    maxlen = max(len(sent) for sent in sentences)
-    print(f'Max sequence length: {maxlen}')
+    maxlen = max([len(s) for s in sentences])
+    words = list(set(data["word"].values))
+    tags = list(set(data["tag"].values))
 
-    words = sorted({w for sent in sentences for w, _ in sent})
-    tags = sorted({t for sent in sentences for _, t in sent})
-    print(f'Vocab size: {len(words)}, Tag count: {len(tags)}')
-
-    for p in [args.output_x_path, args.output_y_path, args.output_preprocessing_state_path]:
-        tf.io.gfile.makedirs(os.path.dirname(p))
-
-    processor = TextPreprocessor(maxlen)
-    processor.fit(texts)
+    processor = TextPreprocessor(140)
+    processor.fit(sentences_list)
     processor.labels = tags
-    preprocessor_save_path = os.path.join(args.output_preprocessing_state_path, PREPROCESS_FILE)
-    processor.save(preprocessor_save_path)
 
-    X = processor.transform(texts)
+    X = processor.transform(sentences_list)
 
     tag2idx = {t: i for i, t in enumerate(tags)}
-    y_indices = [[tag2idx[t] for _, t in sent] for sent in sentences]
-    y_padded = pad_sequences(y_indices, maxlen=maxlen, padding='post', value=tag2idx.get('O', 0))
-    y = [to_categorical(seq, num_classes=len(tags)) for seq in y_padded]
+    y = [[tag2idx[w[1]] for w in s] for s in sentences]
+    y = pad_sequences(maxlen=140, sequences=y, padding="post", value=tag2idx["O"])
+    y = [to_categorical(i, num_classes=len(tags)) for i in y]
 
-    save_pickle(X, args.output_x_path)
-    save_pickle(y, args.output_y_path)
+    # Save X locally
+    x_local = "/tmp/X.pkl"
+    with open(x_local, "wb") as f:
+        pickle.dump(X, f)
+    upload_to_gcs(x_local, args.output_x_path)
 
-    downstream = [
-        (args.output_x_path_file, args.output_x_path),
-        (args.output_y_path_file, args.output_y_path),
-        (args.output_preprocessing_state_path_file, preprocessor_save_path),
-        (args.output_tags, str(len(tags))),
-        (args.output_words, str(len(words)))
-    ]
+    # Save y locally
+    y_local = "/tmp/y.pkl"
+    with open(y_local, "wb") as f:
+        pickle.dump(y, f)
+    upload_to_gcs(y_local, args.output_y_path)
 
-    for file_path, content in downstream:
-        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(file_path).write_text(content)
+    # Save processor locally
+    processor_local = "/tmp/" + PREPROCESS_FILE
+    with open(processor_local, "wb") as f:
+        pickle.dump(processor, f)
+    upload_to_gcs(processor_local, os.path.join(args.output_preprocessing_state_path, PREPROCESS_FILE))
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
